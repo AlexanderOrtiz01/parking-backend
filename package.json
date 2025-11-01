@@ -1,0 +1,29 @@
+{
+  "name": "parking-backend",
+  "version": "1.0.0",
+  "description": "Backend API para integración con Braintree Sandbox/Production",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "start:bun": "bun run index.js",
+    "dev": "bun --watch index.js"
+  },
+  "keywords": [
+    "braintree",
+    "payment",
+    "parking",
+    "api"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "braintree": "^3.23.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "bun": ">=1.0.0"
+  }
+}

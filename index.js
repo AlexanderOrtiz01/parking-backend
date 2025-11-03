@@ -214,6 +214,9 @@ app.post('/api/subscribe', async (req, res) => {
     const { paymentMethodNonce, planId, userId, email } = req.body;
 
     console.log('💳 Creando suscripción...', { planId, userId, email });
+    console.log('🔑 Payment Method Nonce recibido:', paymentMethodNonce);
+    console.log('📋 Tipo de nonce:', typeof paymentMethodNonce);
+    console.log('📏 Longitud del nonce:', paymentMethodNonce ? paymentMethodNonce.length : 0);
 
     if (!paymentMethodNonce || !planId || !userId) {
       return res.status(400).json({
@@ -255,6 +258,7 @@ app.post('/api/subscribe', async (req, res) => {
       console.log('✅ Usando método de pago existente');
     } else {
       console.log('🔧 Creando método de pago...');
+      console.log('   → Usando nonce:', paymentMethodNonce.substring(0, 20) + '...');
       const paymentMethodResult = await gateway.paymentMethod.create({
         customerId: userId,
         paymentMethodNonce: paymentMethodNonce
@@ -500,6 +504,9 @@ app.post('/api/parking-payment', async (req, res) => {
     const { nonce, amount, userId, entryId } = req.body;
 
     console.log('🅿️  Procesando pago de parqueo...', { amount, userId, entryId });
+    console.log('🔑 Nonce recibido:', nonce);
+    console.log('📋 Tipo de nonce:', typeof nonce);
+    console.log('📏 Longitud del nonce:', nonce ? nonce.length : 0);
 
     if (!nonce || !amount || !userId) {
       return res.status(400).json({

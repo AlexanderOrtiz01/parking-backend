@@ -1,3 +1,25 @@
+# 🔧 Actualización del Backend para Tokenización con Datos de Tarjeta
+
+## 📝 **Problema Identificado**
+
+El módulo nativo `react-native-braintree-payments-drop-in` requiere:
+- Compilación nativa (Android/iOS)
+- Archivo `google-services.json` de Firebase
+- Build con `expo prebuild` y `expo run:android`
+
+**Solución**: Tokenizar en el backend usando el SDK oficial de Braintree.
+
+---
+
+## ✅ **Cambios Necesarios en index.js**
+
+Reemplaza el endpoint `/api/subscribe` (línea ~210) con este código:
+
+```javascript
+// ============================================
+// CREAR SUSCRIPCIÓN (CON TOKENIZACIÓN)
+// ============================================
+
 app.post('/api/subscribe', async (req, res) => {
   try {
     const {
@@ -165,3 +187,57 @@ app.post('/api/subscribe', async (req, res) => {
     });
   }
 });
+```
+
+---
+
+## 🚀 **Cómo Aplicar los Cambios**
+
+### 1. **Editar index.js**
+```powershell
+cd C:\Users\multi\Documents\Parking\Parking-Backend
+notepad index.js
+```
+
+### 2. **Buscar** (Ctrl+F): `app.post('/api/subscribe'`
+
+### 3. **Reemplazar** todo el bloque hasta el siguiente `// ====` con el código de arriba
+
+### 4. **Guardar** y cerrar
+
+### 5. **Commit y Push**
+```powershell
+git add index.js
+git commit -m "feat: add card tokenization support in /api/subscribe endpoint"
+git push origin main
+```
+
+### 6. **Verificar Deploy en Koyeb**
+- Ve a https://app.koyeb.com
+- Espera que el servicio se redespliegue automáticamente
+- Verifica los logs
+
+---
+
+## ✅ **Verificación**
+
+Una vez actualizado el backend:
+
+1. **Volver al proyecto frontend**:
+```powershell
+cd C:\Users\multi\Documents\Parking-Project
+```
+
+2. **Probar el pago** con la tarjeta `5555555555554444`
+
+3. **Verificar en Braintree Dashboard** que la tarjeta correcta aparezca
+
+---
+
+## 📋 **Cambios Realizados en Frontend**
+
+✅ `services/braintreeClient.ts` - Valida datos de tarjeta localmente
+✅ `services/braintreeServiceBackend.ts` - Envía datos de tarjeta al backend
+✅ `app/(perfil)/pay.tsx` - Usa el nuevo flujo con datos de tarjeta
+
+**Ahora el backend tokenizará con el SDK oficial de Braintree, que SÍ preserva la tarjeta correcta.**

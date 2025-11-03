@@ -209,104 +209,169 @@ app.get('/api/plans', async (req, res) => {
 // CREAR SUSCRIPCIÓN
 // ============================================
 
-app.post('/api/subscribe', async (req, res) => {
-  try {
-    const { paymentMethodNonce, planId, userId, email } = req.body;
-
-    console.log('💳 Creando suscripción...', { planId, userId, email });
-
-    if (!paymentMethodNonce || !planId || !userId) {
-      return res.status(400).json({
-        success: false,
-        error: 'Faltan datos requeridos',
-        required: ['paymentMethodNonce', 'planId', 'userId']
-      });
-    }
-
-    // Paso 1: Verificar/crear cliente
-    let customer;
-    try {
-      customer = await gateway.customer.find(userId);
-      console.log('✅ Cliente encontrado:', userId);
-    } catch (error) {
-      if (error.type === 'notFoundError') {
-        console.log('🔧 Creando nuevo cliente...');
-        const customerResult = await gateway.customer.create({
-          id: userId,
-          email: email,
-          paymentMethodNonce: paymentMethodNonce
-        });
-
-        if (!customerResult.success) {
-          throw new Error('Error creando cliente: ' + customerResult.message);
-        }
-
-        customer = customerResult.customer;
-        console.log('✅ Cliente creado');
-      } else {
-        throw error;
-      }
-    }
-
-    // Paso 2: Obtener/crear método de pago
-    let paymentMethodToken;
-    if (customer.paymentMethods && customer.paymentMethods.length > 0) {
-      paymentMethodToken = customer.paymentMethods[0].token;
-      console.log('✅ Usando método de pago existente');
-    } else {
-      console.log('🔧 Creando método de pago...');
-      const paymentMethodResult = await gateway.paymentMethod.create({
-        customerId: userId,
-        paymentMethodNonce: paymentMethodNonce
-      });
-
-      if (!paymentMethodResult.success) {
-        throw new Error('Error creando método de pago');
-      }
-
-      paymentMethodToken = paymentMethodResult.paymentMethod.token;
-      console.log('✅ Método de pago creado');
-    }
-
-    // Paso 3: Crear suscripción
-    console.log('🔧 Creando suscripción en Braintree...');
-    const subscriptionResult = await gateway.subscription.create({
-      paymentMethodToken: paymentMethodToken,
-      planId: planId
-    });
-
-    if (!subscriptionResult.success) {
-      console.error('❌ Error creando suscripción:', subscriptionResult.message);
-      return res.status(400).json({
-        success: false,
-        error: 'Error creando suscripción',
-        message: subscriptionResult.message
-      });
-    }
-
-    const subscription = subscriptionResult.subscription;
-    console.log('✅ Suscripción creada:', subscription.id);
-
-    res.json({
-      success: true,
-      subscription: {
-        id: subscription.id,
-        status: subscription.status,
-        planId: subscription.planId,
-        price: subscription.price,
-        nextBillingDate: subscription.nextBillingDate,
-        firstBillingDate: subscription.firstBillingDate
-      },
-      message: 'Suscripción creada exitosamente'
-    });
-  } catch (error) {
-    console.error('❌ Error creando suscripción:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Error creando suscripción',
-      message: error.message
-    });
-  }
+app.post('/api/subscribe', async (req, res) => {
+  try {
+    const { 
+      // Opción A: Recibir nonce (método actual)
+      paymentMethodNonce,
+      // Opción B: Recibir datos de tarjeta directamente
+      cardNumber,
+      expirationMonth,
+      expirationYear,
+      cvv,
+      cardholderName,
+      // Común
+      planId, 
+      userId, 
+      email 
+    } = req.body;
+
+    console.log('💳 Creando suscripción...', { planId, userId, email });
+
+    // Validar que se proporcione nonce O datos de tarjeta
+    if ((!paymentMethodNonce && !cardNumber) || !planId || !userId) {
+      return res.status(400).json({
+        success: false,
+        error: 'Faltan datos requeridos',
+        required: ['(paymentMethodNonce OR cardNumber)', 'planId', 'userId']
+      });
+    }
+
+    // Paso 1: Verificar/crear cliente
+    let customer;
+    try {
+      customer = await gateway.customer.find(userId);
+      console.log('✅ Cliente encontrado:', userId);
+    } catch (error) {
+      if (error.type === 'notFoundError') {
+        console.log('🔧 Creando nuevo cliente...');
+        
+        const customerData = {
+          id: userId,
+          email: email
+        };
+
+        // Decidir si usar nonce o datos de tarjeta
+        if (paymentMethodNonce) {
+          customerData.paymentMethodNonce = paymentMethodNonce;
+          console.log('🎫 Usando nonce:', paymentMethodNonce);
+        } else if (cardNumber && expirationMonth && expirationYear) {
+          customerData.creditCard = {
+            number: cardNumber,
+            expirationMonth: expirationMonth,
+            expirationYear: expirationYear,
+            cvv: cvv,
+            cardholderName: cardholderName || 'Test User',
+            options: {
+              verifyCard: true
+            }
+          };
+          console.log('💳 Usando tarjeta:', cardNumber.slice(0, 4) + '****' + cardNumber.slice(-4));
+        }
+
+        const customerResult = await gateway.customer.create(customerData);
+
+        if (!customerResult.success) {
+          throw new Error('Error creando cliente: ' + customerResult.message);
+        }
+
+        customer = customerResult.customer;
+        console.log('✅ Cliente creado');
+        
+        if (customer.paymentMethods && customer.paymentMethods.length > 0) {
+          console.log('💳 Tarjeta registrada:', {
+            type: customer.paymentMethods[0].cardType,
+            last4: customer.paymentMethods[0].last4
+          });
+        }
+      } else {
+        throw error;
+      }
+    }
+
+    // Paso 2: Obtener/crear método de pago
+    let paymentMethodToken;
+    if (customer.paymentMethods && customer.paymentMethods.length > 0) {
+      paymentMethodToken = customer.paymentMethods[0].token;
+      console.log('✅ Usando método de pago existente');
+    } else {
+      console.log('🔧 Creando método de pago...');
+      
+      const paymentMethodData = {
+        customerId: userId
+      };
+
+      if (paymentMethodNonce) {
+        paymentMethodData.paymentMethodNonce = paymentMethodNonce;
+        console.log('🎫 Usando nonce:', paymentMethodNonce);
+      } else if (cardNumber && expirationMonth && expirationYear) {
+        paymentMethodData.creditCard = {
+          number: cardNumber,
+          expirationMonth: expirationMonth,
+          expirationYear: expirationYear,
+          cvv: cvv,
+          cardholderName: cardholderName || 'Test User',
+          options: {
+            verifyCard: true
+          }
+        };
+        console.log('💳 Usando tarjeta:', cardNumber.slice(0, 4) + '****' + cardNumber.slice(-4));
+      }
+
+      const paymentMethodResult = await gateway.paymentMethod.create(paymentMethodData);
+
+      if (!paymentMethodResult.success) {
+        throw new Error('Error creando método de pago');
+      }
+
+      paymentMethodToken = paymentMethodResult.paymentMethod.token;
+      console.log('✅ Método de pago creado');
+      console.log('💳 Tarjeta registrada:', {
+        type: paymentMethodResult.paymentMethod.cardType,
+        last4: paymentMethodResult.paymentMethod.last4
+      });
+    }
+
+    // Paso 3: Crear suscripción
+    console.log('🔧 Creando suscripción en Braintree...');
+    const subscriptionResult = await gateway.subscription.create({
+      paymentMethodToken: paymentMethodToken,
+      planId: planId
+    });
+
+    if (!subscriptionResult.success) {
+      console.error('❌ Error creando suscripción:', subscriptionResult.message);
+      return res.status(400).json({
+        success: false,
+        error: 'Error creando suscripción',
+        message: subscriptionResult.message
+      });
+    }
+
+    const subscription = subscriptionResult.subscription;
+    console.log('✅ Suscripción creada:', subscription.id);
+
+    res.json({
+      success: true,
+      subscription: {
+        id: subscription.id,
+        status: subscription.status,
+        planId: subscription.planId,
+        price: subscription.price,
+        nextBillingDate: subscription.nextBillingDate,
+        firstBillingDate: subscription.firstBillingDate
+      },
+      message: 'Suscripción creada exitosamente'
+    });
+  } catch (error) {
+    console.error('❌ Error creando suscripción:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Error creando suscripción',
+      message: error.message
+    });
+  }
+});
 });
 
 // ============================================

@@ -238,62 +238,89 @@ app.post('/api/subscribe', async (req, res) => {
     }
 
     let finalNonce = paymentMethodNonce;
+    let customerCreatedWithCard = false;
 
     // Si no hay nonce pero sí datos de tarjeta, tokenizar en el backend
     if (!finalNonce && cardNumber && expirationMonth && expirationYear && cvv) {
-      console.log('🔐 Tokenizando tarjeta en el backend...');
+      console.log('🔐 Procesando tarjeta en el backend...');
       console.log('   Tarjeta terminada en:', cardNumber.slice(-4));
       console.log('   Expiración:', `${expirationMonth}/${expirationYear}`);
       
       try {
-        // Paso 1: Verificar/crear cliente PRIMERO
+        // Estrategia: Crear cliente CON la tarjeta en una sola operación
+        // Esto es más seguro y permitido por Braintree
         let customer;
         try {
+          // Intentar encontrar el cliente existente
           customer = await gateway.customer.find(userId);
-          console.log('✅ Cliente encontrado para tokenización:', userId);
+          console.log('✅ Cliente ya existe:', userId);
+          
+          // Si el cliente existe, agregar el método de pago
+          console.log('🔧 Agregando método de pago al cliente existente...');
+          const paymentMethodResult = await gateway.paymentMethod.create({
+            customerId: userId,
+            creditCard: {
+              number: cardNumber.replace(/\s/g, ''),
+              expirationMonth: expirationMonth,
+              expirationYear: expirationYear,
+              cvv: cvv,
+              cardholderName: cardholderName || 'Usuario'
+            },
+            options: {
+              verifyCard: true,
+              makeDefault: true
+            }
+          });
+
+          if (!paymentMethodResult.success) {
+            throw new Error('Error agregando método de pago: ' + paymentMethodResult.message);
+          }
+
+          finalNonce = paymentMethodResult.paymentMethod.token;
+          console.log('✅ Método de pago agregado exitosamente');
+          
         } catch (error) {
           if (error.type === 'notFoundError') {
-            console.log('🔧 Creando cliente para tokenización...');
+            // Cliente no existe, crearlo CON la tarjeta
+            console.log('🔧 Creando cliente con tarjeta incluida...');
             const customerResult = await gateway.customer.create({
               id: userId,
-              email: email
+              email: email,
+              creditCard: {
+                number: cardNumber.replace(/\s/g, ''),
+                expirationMonth: expirationMonth,
+                expirationYear: expirationYear,
+                cvv: cvv,
+                cardholderName: cardholderName || 'Usuario',
+                options: {
+                  verifyCard: true
+                }
+              }
             });
 
             if (!customerResult.success) {
-              throw new Error('Error creando cliente: ' + customerResult.message);
+              throw new Error('Error creando cliente con tarjeta: ' + customerResult.message);
             }
 
             customer = customerResult.customer;
-            console.log('✅ Cliente creado para tokenización');
+            customerCreatedWithCard = true;
+            
+            // Obtener el token del método de pago creado
+            if (customer.paymentMethods && customer.paymentMethods.length > 0) {
+              finalNonce = customer.paymentMethods[0].token;
+              console.log('✅ Cliente y método de pago creados exitosamente');
+            } else {
+              throw new Error('No se pudo obtener el token del método de pago');
+            }
           } else {
             throw error;
           }
         }
 
-        // Paso 2: Ahora crear el método de pago con el cliente existente
-        const tokenizeResult = await gateway.paymentMethod.create({
-          customerId: userId,
-          creditCard: {
-            number: cardNumber.replace(/\s/g, ''),
-            expirationMonth: expirationMonth,
-            expirationYear: expirationYear,
-            cvv: cvv,
-            cardholderName: cardholderName || 'Usuario'
-          },
-          options: {
-            verifyCard: true
-          }
-        });
-
-        if (!tokenizeResult.success) {
-          throw new Error('Error tokenizando tarjeta: ' + tokenizeResult.message);
-        }
-
-        finalNonce = tokenizeResult.paymentMethod.token;
-        console.log('✅ Tarjeta tokenizada exitosamente');
-        console.log('   Token:', finalNonce.substring(0, 10) + '...');
+        console.log('   Token obtenido:', finalNonce.substring(0, 10) + '...');
+        
       } catch (tokenError) {
-        console.error('❌ Error tokenizando tarjeta:', tokenError);
+        console.error('❌ Error procesando tarjeta:', tokenError);
         return res.status(400).json({
           success: false,
           error: 'Error procesando tarjeta',
@@ -313,27 +340,31 @@ app.post('/api/subscribe', async (req, res) => {
 
     console.log('🔑 Payment Method Token:', finalNonce.substring(0, 10) + '...');
 
-    // Verificar que el cliente existe (ya debería existir si tokenizamos arriba)
-    try {
-      await gateway.customer.find(userId);
-      console.log('✅ Cliente verificado:', userId);
-    } catch (error) {
-      if (error.type === 'notFoundError') {
-        // Si el cliente no existe (caso paymentMethodNonce), crearlo ahora
-        console.log('🔧 Creando cliente...');
-        const customerResult = await gateway.customer.create({
-          id: userId,
-          email: email
-        });
+    // Verificar que el cliente existe (solo si no lo creamos arriba)
+    if (!customerCreatedWithCard) {
+      try {
+        await gateway.customer.find(userId);
+        console.log('✅ Cliente verificado:', userId);
+      } catch (error) {
+        if (error.type === 'notFoundError') {
+          // Si el cliente no existe (caso paymentMethodNonce), crearlo ahora
+          console.log('🔧 Creando cliente...');
+          const customerResult = await gateway.customer.create({
+            id: userId,
+            email: email
+          });
 
-        if (!customerResult.success) {
-          throw new Error('Error creando cliente: ' + customerResult.message);
+          if (!customerResult.success) {
+            throw new Error('Error creando cliente: ' + customerResult.message);
+          }
+
+          console.log('✅ Cliente creado');
+        } else {
+          throw error;
         }
-
-        console.log('✅ Cliente creado');
-      } else {
-        throw error;
       }
+    } else {
+      console.log('✅ Cliente ya creado con tarjeta');
     }
 
     // Usar el token que ya tenemos (de la tarjeta tokenizada o del nonce)

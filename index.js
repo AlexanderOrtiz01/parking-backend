@@ -165,7 +165,74 @@ app.post('/api/token', async (req, res) => {
     });
   }
 });
+// ============================================
+// TOKENIZAR TARJETA
+// ============================================
 
+app.post('/api/tokenize', async (req, res) => {
+  try {
+    const { cardNumber, expirationMonth, expirationYear, cvv, cardholderName, email } = req.body;
+
+    console.log('🔐 Tokenizando tarjeta...');
+    console.log('   Número:', cardNumber.substring(0, 4) + '****' + cardNumber.substring(cardNumber.length - 4));
+    console.log('   Expiración:', expirationMonth + '/' + expirationYear);
+    console.log('   Titular:', cardholderName);
+
+    // Validar datos requeridos
+    if (!cardNumber || !expirationMonth || !expirationYear || !cvv) {
+      return res.status(400).json({
+        success: false,
+        error: 'Faltan datos de la tarjeta',
+        required: ['cardNumber', 'expirationMonth', 'expirationYear', 'cvv']
+      });
+    }
+
+    // Tokenizar usando Braintree
+    const result = await retryBraintreeCall(async () => {
+      // Crear un cliente temporal para tokenizar
+      const clientTokenResponse = await gateway.clientToken.generate();
+      
+      // Nota: En producción real, el cliente debe tokenizar usando braintree-web
+      // Este es un workaround para desarrollo
+      return await gateway.paymentMethod.create({
+        customerId: null,
+        paymentMethodNonce: 'fake-valid-nonce', // Braintree SDK genera el nonce real
+        creditCard: {
+          number: cardNumber,
+          expirationMonth: expirationMonth,
+          expirationYear: expirationYear,
+          cvv: cvv,
+          cardholderName: cardholderName || 'Usuario'
+        }
+      });
+    });
+
+    if (!result.success) {
+      console.error('❌ Error tokenizando:', result.message);
+      return res.status(400).json({
+        success: false,
+        error: result.message || 'Error tokenizando tarjeta'
+      });
+    }
+
+    const nonce = result.paymentMethod.nonce;
+    console.log('✅ Tarjeta tokenizada - Nonce:', nonce.substring(0, 10) + '...');
+
+    res.json({
+      success: true,
+      nonce: nonce,
+      message: 'Tarjeta tokenizada exitosamente'
+    });
+
+  } catch (error) {
+    console.error('❌ Error tokenizando tarjeta:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Error tokenizando tarjeta',
+      message: error.message
+    });
+  }
+});
 // ============================================
 // OBTENER PLANES
 // ============================================

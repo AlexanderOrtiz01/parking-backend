@@ -246,7 +246,31 @@ app.post('/api/subscribe', async (req, res) => {
       console.log('   Expiración:', `${expirationMonth}/${expirationYear}`);
       
       try {
-        // Tokenizar con el SDK de Braintree (esto preserva la tarjeta correcta)
+        // Paso 1: Verificar/crear cliente PRIMERO
+        let customer;
+        try {
+          customer = await gateway.customer.find(userId);
+          console.log('✅ Cliente encontrado para tokenización:', userId);
+        } catch (error) {
+          if (error.type === 'notFoundError') {
+            console.log('🔧 Creando cliente para tokenización...');
+            const customerResult = await gateway.customer.create({
+              id: userId,
+              email: email
+            });
+
+            if (!customerResult.success) {
+              throw new Error('Error creando cliente: ' + customerResult.message);
+            }
+
+            customer = customerResult.customer;
+            console.log('✅ Cliente creado para tokenización');
+          } else {
+            throw error;
+          }
+        }
+
+        // Paso 2: Ahora crear el método de pago con el cliente existente
         const tokenizeResult = await gateway.paymentMethod.create({
           customerId: userId,
           creditCard: {
@@ -289,14 +313,14 @@ app.post('/api/subscribe', async (req, res) => {
 
     console.log('🔑 Payment Method Token:', finalNonce.substring(0, 10) + '...');
 
-    // Paso 1: Verificar/crear cliente
-    let customer;
+    // Verificar que el cliente existe (ya debería existir si tokenizamos arriba)
     try {
-      customer = await gateway.customer.find(userId);
-      console.log('✅ Cliente encontrado:', userId);
+      await gateway.customer.find(userId);
+      console.log('✅ Cliente verificado:', userId);
     } catch (error) {
       if (error.type === 'notFoundError') {
-        console.log('🔧 Creando nuevo cliente...');
+        // Si el cliente no existe (caso paymentMethodNonce), crearlo ahora
+        console.log('🔧 Creando cliente...');
         const customerResult = await gateway.customer.create({
           id: userId,
           email: email
@@ -306,14 +330,13 @@ app.post('/api/subscribe', async (req, res) => {
           throw new Error('Error creando cliente: ' + customerResult.message);
         }
 
-        customer = customerResult.customer;
         console.log('✅ Cliente creado');
       } else {
         throw error;
       }
     }
 
-    // Paso 2: Usar el token que ya tenemos (de la tarjeta tokenizada)
+    // Usar el token que ya tenemos (de la tarjeta tokenizada o del nonce)
     const paymentMethodToken = finalNonce;
 
     // Paso 3: Crear suscripción

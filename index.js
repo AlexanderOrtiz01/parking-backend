@@ -100,6 +100,8 @@ app.get('/', (req, res) => {
       health: 'GET /api/health',
       config: 'GET /api/config',
       token: 'POST /api/token',
+      getClientToken: 'GET /api/get-client-token',
+      tokenizeCard: 'POST /api/tokenize-card',
       subscribe: 'POST /api/subscribe',
       subscriptionStatus: 'GET /api/subscription/status',
       cancelSubscription: 'POST /api/subscription/cancel',
@@ -162,6 +164,86 @@ app.post('/api/token', async (req, res) => {
       success: false,
       error: 'Error generando token',
       message: error.message
+    });
+  }
+});
+
+app.get('/api/get-client-token', async (req, res) => {
+  try {
+    console.log('🔑 Generando client token...');
+    
+    const response = await gateway.clientToken.generate({});
+    
+    console.log('✅ Client token generado exitosamente');
+    
+    res.json({
+      success: true,
+      clientToken: response.clientToken,
+    });
+  } catch (error) {
+    console.error('❌ Error generando client token:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Error generando client token',
+      details: error.message,
+    });
+  }
+});
+
+app.post('/api/tokenize-card', async (req, res) => {
+  try {
+    const { cardData } = req.body;
+    
+    console.log('🔐 Tokenizando tarjeta...');
+    console.log('   Número:', `****${cardData.number.slice(-4)}`);
+    console.log('   Expiración:', `${cardData.expirationMonth}/${cardData.expirationYear}`);
+    
+    if (!cardData || !cardData.number || !cardData.expirationMonth || 
+        !cardData.expirationYear || !cardData.cvv) {
+      return res.status(400).json({
+        success: false,
+        error: 'Datos de tarjeta incompletos',
+      });
+    }
+    
+    const result = await gateway.paymentMethod.create({
+      customerId: null,
+      paymentMethodNonce: null,
+      creditCard: {
+        number: cardData.number,
+        expirationMonth: cardData.expirationMonth,
+        expirationYear: cardData.expirationYear,
+        cvv: cardData.cvv,
+        cardholderName: cardData.cardholderName || 'Usuario',
+      },
+    });
+    
+    if (!result.success) {
+      console.error('❌ Error tokenizando:', result.message);
+      return res.status(400).json({
+        success: false,
+        error: result.message || 'Error tokenizando tarjeta',
+        details: result.errors ? result.errors.deepErrors() : [],
+      });
+    }
+    
+    console.log('✅ Tarjeta tokenizada exitosamente');
+    console.log('   Nonce:', result.paymentMethod.token);
+    
+    res.json({
+      success: true,
+      nonce: result.paymentMethod.token,
+      cardType: result.paymentMethod.cardType,
+      last4: result.paymentMethod.last4,
+      expirationMonth: result.paymentMethod.expirationMonth,
+      expirationYear: result.paymentMethod.expirationYear,
+    });
+  } catch (error) {
+    console.error('❌ Error en tokenización:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Error al tokenizar tarjeta',
+      details: error.message,
     });
   }
 });
@@ -677,6 +759,8 @@ app.use((req, res) => {
       health: 'GET /',
       config: 'GET /api/config',
       token: 'POST /api/token',
+      getClientToken: 'GET /api/get-client-token',
+      tokenizeCard: 'POST /api/tokenize-card',
       subscribe: 'POST /api/subscribe',
       subscriptionStatus: 'GET /api/subscription/status',
       cancelSubscription: 'POST /api/subscription/cancel',
@@ -713,6 +797,8 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log('   GET  /api/config    → Configuración de URLs');
   console.log('   GET  /api/health    → Health check simple');
   console.log('   POST /api/token     → Generar client token');
+  console.log('   GET  /api/get-client-token → Obtener client token');
+  console.log('   POST /api/tokenize-card → Tokenizar tarjeta');
   console.log('   POST /api/subscribe → Crear suscripción');
   console.log('   GET  /api/subscription/status → Consultar suscripción');
   console.log('   PUT  /api/subscription/update → Actualizar suscripción');

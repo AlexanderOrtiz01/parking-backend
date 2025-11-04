@@ -100,6 +100,7 @@ app.get('/', (req, res) => {
       health: 'GET /api/health',
       config: 'GET /api/config',
       token: 'POST /api/token',
+      tokenGet: 'GET /api/token',
       subscribe: 'POST /api/subscribe',
       subscriptionStatus: 'GET /api/subscription/status',
       cancelSubscription: 'POST /api/subscription/cancel',
@@ -140,6 +141,36 @@ app.post('/api/token', async (req, res) => {
   try {
     const { customerId } = req.body;
     console.log('🔧 Generando client token...');
+
+    const tokenOptions = {};
+    if (customerId) {
+      tokenOptions.customerId = customerId;
+    }
+
+    const response = await retryBraintreeCall(async () => {
+      return await gateway.clientToken.generate(tokenOptions);
+    });
+
+    console.log('✅ Client token generado exitosamente');
+
+    res.json({
+      success: true,
+      clientToken: response.clientToken
+    });
+  } catch (error) {
+    console.error('❌ Error generando token:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Error generando token',
+      message: error.message
+    });
+  }
+});
+
+app.get('/api/token', async (req, res) => {
+  try {
+    const { customerId } = req.query;
+    console.log('🔧 Generando client token (GET)...');
 
     const tokenOptions = {};
     if (customerId) {
@@ -744,6 +775,7 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log('   GET  /api/config    → Configuración de URLs');
   console.log('   GET  /api/health    → Health check simple');
   console.log('   POST /api/token     → Generar client token');
+  console.log('   GET  /api/token     → Generar client token (GET)');
   console.log('   POST /api/subscribe → Crear suscripción');
   console.log('   GET  /api/subscription/status → Consultar suscripción');
   console.log('   PUT  /api/subscription/update → Actualizar suscripción');

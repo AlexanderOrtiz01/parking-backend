@@ -100,8 +100,6 @@ app.get('/', (req, res) => {
       health: 'GET /api/health',
       config: 'GET /api/config',
       token: 'POST /api/token',
-      getClientToken: 'GET /api/get-client-token',
-      tokenizeCard: 'POST /api/tokenize-card',
       subscribe: 'POST /api/subscribe',
       subscriptionStatus: 'GET /api/subscription/status',
       cancelSubscription: 'POST /api/subscription/cancel',
@@ -164,86 +162,6 @@ app.post('/api/token', async (req, res) => {
       success: false,
       error: 'Error generando token',
       message: error.message
-    });
-  }
-});
-
-app.get('/api/get-client-token', async (req, res) => {
-  try {
-    console.log('🔑 Generando client token...');
-    
-    const response = await gateway.clientToken.generate({});
-    
-    console.log('✅ Client token generado exitosamente');
-    
-    res.json({
-      success: true,
-      clientToken: response.clientToken,
-    });
-  } catch (error) {
-    console.error('❌ Error generando client token:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Error generando client token',
-      details: error.message,
-    });
-  }
-});
-
-app.post('/api/tokenize-card', async (req, res) => {
-  try {
-    const { cardData } = req.body;
-    
-    console.log('🔐 Tokenizando tarjeta...');
-    console.log('   Número:', `****${cardData.number.slice(-4)}`);
-    console.log('   Expiración:', `${cardData.expirationMonth}/${cardData.expirationYear}`);
-    
-    if (!cardData || !cardData.number || !cardData.expirationMonth || 
-        !cardData.expirationYear || !cardData.cvv) {
-      return res.status(400).json({
-        success: false,
-        error: 'Datos de tarjeta incompletos',
-      });
-    }
-    
-    const result = await gateway.paymentMethod.create({
-      customerId: null,
-      paymentMethodNonce: null,
-      creditCard: {
-        number: cardData.number,
-        expirationMonth: cardData.expirationMonth,
-        expirationYear: cardData.expirationYear,
-        cvv: cardData.cvv,
-        cardholderName: cardData.cardholderName || 'Usuario',
-      },
-    });
-    
-    if (!result.success) {
-      console.error('❌ Error tokenizando:', result.message);
-      return res.status(400).json({
-        success: false,
-        error: result.message || 'Error tokenizando tarjeta',
-        details: result.errors ? result.errors.deepErrors() : [],
-      });
-    }
-    
-    console.log('✅ Tarjeta tokenizada exitosamente');
-    console.log('   Nonce:', result.paymentMethod.token);
-    
-    res.json({
-      success: true,
-      nonce: result.paymentMethod.token,
-      cardType: result.paymentMethod.cardType,
-      last4: result.paymentMethod.last4,
-      expirationMonth: result.paymentMethod.expirationMonth,
-      expirationYear: result.paymentMethod.expirationYear,
-    });
-  } catch (error) {
-    console.error('❌ Error en tokenización:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Error al tokenizar tarjeta',
-      details: error.message,
     });
   }
 });
@@ -420,16 +338,24 @@ app.post('/api/subscribe', async (req, res) => {
       });
     }
 
-    console.log('🔑 Payment Method Token:', finalNonce.substring(0, 10) + '...');
+    console.log('🔑 Nonce/Token recibido:', finalNonce.substring(0, 10) + '...');
 
-    // Verificar que el cliente existe (solo si no lo creamos arriba)
+    // Determinar si finalNonce es un token de método de pago o un nonce
+    let paymentMethodToken = finalNonce;
+    let needsConversion = false;
+
+    // Si customerCreatedWithCard es false, significa que tenemos un nonce del cliente
+    // que necesita ser convertido a un payment method token
     if (!customerCreatedWithCard) {
+      // Verificar que el cliente existe
+      let customerExists = false;
       try {
         await gateway.customer.find(userId);
+        customerExists = true;
         console.log('✅ Cliente verificado:', userId);
       } catch (error) {
         if (error.type === 'notFoundError') {
-          // Si el cliente no existe (caso paymentMethodNonce), crearlo ahora
+          // Cliente no existe, crearlo ahora
           console.log('🔧 Creando cliente...');
           const customerResult = await gateway.customer.create({
             id: userId,
@@ -440,17 +366,40 @@ app.post('/api/subscribe', async (req, res) => {
             throw new Error('Error creando cliente: ' + customerResult.message);
           }
 
+          customerExists = true;
           console.log('✅ Cliente creado');
         } else {
           throw error;
         }
       }
-    } else {
-      console.log('✅ Cliente ya creado con tarjeta');
-    }
 
-    // Usar el token que ya tenemos (de la tarjeta tokenizada o del nonce)
-    const paymentMethodToken = finalNonce;
+      // Ahora crear el método de pago con el nonce
+      if (customerExists) {
+        console.log('🔧 Convirtiendo nonce a payment method token...');
+        try {
+          const paymentMethodResult = await gateway.paymentMethod.create({
+            customerId: userId,
+            paymentMethodNonce: finalNonce,
+            options: {
+              verifyCard: true,
+              makeDefault: true
+            }
+          });
+
+          if (!paymentMethodResult.success) {
+            throw new Error('Error creando método de pago: ' + paymentMethodResult.message);
+          }
+
+          paymentMethodToken = paymentMethodResult.paymentMethod.token;
+          console.log('✅ Payment method token obtenido:', paymentMethodToken.substring(0, 10) + '...');
+        } catch (error) {
+          console.error('❌ Error convirtiendo nonce:', error);
+          throw new Error('Error procesando método de pago: ' + error.message);
+        }
+      }
+    } else {
+      console.log('✅ Cliente ya creado con tarjeta, usando token existente');
+    }
 
     // Paso 3: Crear suscripción
     console.log('🔧 Creando suscripción en Braintree...');
@@ -759,8 +708,6 @@ app.use((req, res) => {
       health: 'GET /',
       config: 'GET /api/config',
       token: 'POST /api/token',
-      getClientToken: 'GET /api/get-client-token',
-      tokenizeCard: 'POST /api/tokenize-card',
       subscribe: 'POST /api/subscribe',
       subscriptionStatus: 'GET /api/subscription/status',
       cancelSubscription: 'POST /api/subscription/cancel',
@@ -797,8 +744,6 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log('   GET  /api/config    → Configuración de URLs');
   console.log('   GET  /api/health    → Health check simple');
   console.log('   POST /api/token     → Generar client token');
-  console.log('   GET  /api/get-client-token → Obtener client token');
-  console.log('   POST /api/tokenize-card → Tokenizar tarjeta');
   console.log('   POST /api/subscribe → Crear suscripción');
   console.log('   GET  /api/subscription/status → Consultar suscripción');
   console.log('   PUT  /api/subscription/update → Actualizar suscripción');
